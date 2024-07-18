@@ -8,7 +8,9 @@ jobs:
   deploy:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
-
+    outputs:
+      deployment_status: ${{ steps.set_status.outputs.deployment_status }}
+  
     steps:
     - name: checkout code
       uses: actions/checkout@v2
@@ -17,10 +19,12 @@ jobs:
       uses: docker/setup-buildx-action@v1
 
     - name: Build container
+      id: build
       run: |
         docker build -t pr-${{ github.event.number }} . || echo "build_failed=true" >> $GITHUB_ENV
 
     - name: deploy or update container
+      id: deploy
       run: |
         CONTAINER_NAME=pr-$ {{ github.event.number }}
         RUNNING=$(docker ps --filter "name=$CONTAINER_NAME" -q)
@@ -32,24 +36,29 @@ jobs:
           echo "Creating a new container $CONTAINER_NAME"
         fi
         docker run -d --name $CONTAINER_NAME -p 80:80 pr-${{ github.event.number }} || echo "deploy_failed=true" >> $GITHUB_ENV
-    
-    - name: set deployment status
-      if: always()
+        
+    - name: Set deployment status
+      id: set_status
       run: |
-        if [ "${{ env.build_failed }}" == "true" ]; then
-          echo "Deployment failed during build."
-          echo "deployment_status=failure" >> $GITHUB_ENV
-        elif [ "${{ env.deploy_failed }}" == "true" ]; then
-          echo "Deployment failed during container deployment."
-          echo "deployment_status=failure" >> $GITHUB_ENV
+        if [ -f $GITHUB_ENV ]; then
+          if grep -q "build_failed=true" $GITHUB_ENV; then
+            echo "Deployment failed during build."
+            echo "::set-output name=deployment_status::failure"
+          elif grep -q "deploy_failed=true" $GITHUB_ENV; then
+            echo "Deployment failed during container deployment."
+            echo "::set-output name=deployment_status::failure"
+          else
+            echo "Deployment successful."
+            echo "::set-output name=deployment_status::success"
+          fi
         else
-          echo "Deployment successful."
-          echo "deployment_status=success" >> $GITHUB_ENV
+          echo "::set-output name=deployment_status::unknown"
+        fi
 
   notify:
     needs: deploy
     runs-on: ubuntu-latest
-    if: ${{ env.deployment_status }} == 'failure' || ${{ env.deployment_status }} == 'success'
+    if: ${{ needs.deploy.outputs.deployment_status }} == 'failure' || ${{ needs.deploy.outputs.deployment_status }} == 'success'
 
     steps:
     - name: notify github bot
@@ -57,7 +66,7 @@ jobs:
         curl -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
         -H "Content-Type: application/json" \
         -d '{
-            "body": "Deployment status: ${{ env.deployment_status }}, Pull request: pr-${{ github.event.number }})"
+            "body": "Deployment status: ${{ needs.deploy.outputs.deployment_status }}, Pull request: pr-${{ github.event.number }}"
           }' \
         https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.number }}/comments
 
