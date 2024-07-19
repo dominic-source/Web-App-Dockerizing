@@ -34,4 +34,4 @@ docker-compose up -d
 - Access the deployed adminer on: **db.www.cadaservices.tech**
 - Access the deployed traefik on: **proxy.www.cadaservices.tech**
 
-## End of page to me yesterday
+## End of page to me now
